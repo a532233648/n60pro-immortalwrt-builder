@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-netcore-n60-pro
@@ -14,8 +14,6 @@ env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: openwrt-25.12
   CONFIG_FILE: n60pro.config
-  DIY_PART1: diy-part1.sh
-  DIY_PART2: diy-part2.sh
   TZ: Asia/Shanghai
 
 jobs:
@@ -36,7 +34,6 @@ jobs:
           sudo rm -rf /opt/hostedtoolcache/CodeQL
           sudo docker image prune --all --force || true
 
-          echo "Disk space:"
           df -h
 
       - name: Install build dependencies
@@ -128,33 +125,23 @@ jobs:
             "${REPO_URL}" \
             openwrt
 
-          cd openwrt
-
-          echo "Source branch:"
-          git branch --show-current
-
-          echo "Source commit:"
-          git log -1 --oneline
+          git -C openwrt log -1 --oneline
 
       - name: Run diy-part1.sh
         working-directory: openwrt
         run: |
-          bash "$GITHUB_WORKSPACE/${DIY_PART1}"
+          bash "$GITHUB_WORKSPACE/diy-part1.sh"
 
-      - name: Update feeds
+      - name: Update and install feeds
         working-directory: openwrt
         run: |
           ./scripts/feeds update -a
-
-      - name: Install feeds
-        working-directory: openwrt
-        run: |
           ./scripts/feeds install -a
 
       - name: Run diy-part2.sh
         working-directory: openwrt
         run: |
-          bash "$GITHUB_WORKSPACE/${DIY_PART2}"
+          bash "$GITHUB_WORKSPACE/diy-part2.sh"
 
       - name: Load build configuration
         working-directory: openwrt
@@ -163,17 +150,35 @@ jobs:
 
           make defconfig
 
-          echo "Selected target:"
-          grep -E \
-            '^CONFIG_TARGET_|DEVICE_netcore_n60-pro|CONFIG_PACKAGE_luci|CONFIG_LUCI_LANG' \
-            .config | head -n 100
+          echo "Target configuration:"
 
-          if ! grep -q \
-            '^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_netcore_n60-pro=y' \
+          grep -E \
+            '^CONFIG_TARGET_mediatek|^CONFIG_TARGET_MULTI_PROFILE|netcore_n60-pro' \
+            .config
+
+          if ! grep -qx \
+            'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_netcore_n60-pro=y' \
             .config; then
             echo "Netcore N60 Pro target is not selected."
             exit 1
           fi
+
+          echo "Check required packages:"
+
+          for package in \
+            luci-app-openclash \
+            luci-app-zerotier \
+            luci-app-nlbwmon \
+            luci-app-wol \
+            luci-app-cloudflared
+          do
+            if ! grep -qx "CONFIG_PACKAGE_${package}=y" .config; then
+              echo "Package is not selected: ${package}"
+              exit 1
+            fi
+
+            echo "Selected: ${package}"
+          done
 
       - name: Restore download cache
         uses: actions/cache@v4
@@ -189,56 +194,175 @@ jobs:
         run: |
           make download -j8 || make download -j1 V=s
 
-          echo "Remove incomplete download files:"
           find dl -type f -size -1024c -print -delete
 
       - name: Compile firmware
         working-directory: openwrt
         run: |
-          echo "CPU threads: $(nproc)"
-
           make -j"$(nproc)" || make -j1 V=s
 
-      - name: Collect firmware
+      - name: Prepare release information
+        run: |
+          BUILD_DATE="$(TZ=Asia/Shanghai date +%Y-%m-%d)"
+          FILE_DATE="$(TZ=Asia/Shanghai date +%Y%m%d)"
+
+          SOURCE_REVISION="$(cd openwrt && ./scripts/getver.sh)"
+          SOURCE_COMMIT="$(git -C openwrt rev-parse --short=8 HEAD)"
+
+          RELEASE_TAG="v25.12-${FILE_DATE}-b${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+
+          RELEASE_TITLE="Netcore N60 Pro ImmortalWrt 25.12 - ${BUILD_DATE} - Build ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+
+          FILE_PREFIX="Netcore-N60-Pro-ImmortalWrt-25.12-${FILE_DATE}"
+
+          echo "BUILD_DATE=${BUILD_DATE}" >> "$GITHUB_ENV"
+          echo "SOURCE_REVISION=${SOURCE_REVISION}" >> "$GITHUB_ENV"
+          echo "SOURCE_COMMIT=${SOURCE_COMMIT}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "RELEASE_TITLE=${RELEASE_TITLE}" >> "$GITHUB_ENV"
+          echo "FILE_PREFIX=${FILE_PREFIX}" >> "$GITHUB_ENV"
+
+      - name: Collect and rename firmware
         run: |
           TARGET_DIR="openwrt/bin/targets/mediatek/filogic"
 
-          if [ ! -d "$TARGET_DIR" ]; then
-            echo "Firmware output directory was not generated."
+          mkdir -p firmware
+
+          shopt -s nullglob
+
+          files=("$TARGET_DIR"/*netcore_n60-pro*)
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No Netcore N60 Pro firmware files were generated."
             exit 1
           fi
 
-          mkdir -p firmware
+          for file in "${files[@]}"; do
+            base="$(basename "$file")"
+            extension="${base##*.}"
 
-          find "$TARGET_DIR" \
-            -maxdepth 1 \
-            -type f \
-            \( \
-              -name '*netcore_n60-pro*' \
-              -o -name 'sha256sums' \
-              -o -name 'profiles.json' \
-              -o -name '*.manifest' \
-              -o -name 'config.buildinfo' \
-              -o -name 'feeds.buildinfo' \
-              -o -name 'version.buildinfo' \
-            \) \
-            -exec cp -v {} firmware/ \;
+            case "$base" in
+              *squashfs-sysupgrade*)
+                cp "$file" \
+                  "firmware/${FILE_PREFIX}-sysupgrade.${extension}"
+                ;;
+
+              *initramfs-recovery*)
+                cp "$file" \
+                  "firmware/${FILE_PREFIX}-recovery.${extension}"
+                ;;
+
+              *bl31-uboot*)
+                cp "$file" \
+                  "firmware/${FILE_PREFIX}-uboot.${extension}"
+                ;;
+
+              *preloader*)
+                cp "$file" \
+                  "firmware/${FILE_PREFIX}-preloader.${extension}"
+                ;;
+            esac
+          done
+
+          if [ -f "$TARGET_DIR/config.buildinfo" ]; then
+            cp "$TARGET_DIR/config.buildinfo" \
+              "firmware/${FILE_PREFIX}-config.buildinfo"
+          fi
+
+          if [ -f "$TARGET_DIR/feeds.buildinfo" ]; then
+            cp "$TARGET_DIR/feeds.buildinfo" \
+              "firmware/${FILE_PREFIX}-feeds.buildinfo"
+          fi
+
+          if [ -f "$TARGET_DIR/version.buildinfo" ]; then
+            cp "$TARGET_DIR/version.buildinfo" \
+              "firmware/${FILE_PREFIX}-version.buildinfo"
+          fi
+
+          manifest=("$TARGET_DIR"/*.manifest)
+
+          if [ "${#manifest[@]}" -gt 0 ]; then
+            cp "${manifest[0]}" \
+              "firmware/${FILE_PREFIX}-packages.manifest"
+          fi
+
+          cat > "firmware/${FILE_PREFIX}-build-info.txt" <<INFO
+          Device: Netcore N60 Pro
+          Firmware: ImmortalWrt 25.12
+          Build date: ${BUILD_DATE}
+          Source revision: ${SOURCE_REVISION}
+          Source commit: ${SOURCE_COMMIT}
+          GitHub build: ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}
+          Default IP: 192.168.10.1
+          Included: OpenClash, ZeroTier, Wake-on-LAN, nlbwmon, Cloudflare Tunnel
+          INFO
+
+          (
+            cd firmware
+            sha256sum * > "${FILE_PREFIX}-sha256sums.txt"
+          )
 
           echo "Firmware files:"
+
           ls -lh firmware
 
           if ! find firmware \
             -type f \
-            -name '*netcore_n60-pro-squashfs-sysupgrade.*' \
+            -name '*-sysupgrade.*' \
             | grep -q .; then
-            echo "N60 Pro sysupgrade firmware was not generated."
+            echo "Sysupgrade firmware was not generated."
             exit 1
           fi
 
-      - name: Upload firmware
-        uses: actions/upload-artifact@v4
-        with:
-          name: Netcore-N60-Pro-ImmortalWrt-25.12
-          path: firmware/*
-          if-no-files-found: error
-          retention-days: 30
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OPENCLASH_VERSION="$(
+            sed -n 's/^PKG_VERSION:=//p' \
+            openwrt/package/luci-app-openclash/Makefile \
+            | head -n1
+          )"
+
+          ZEROTIER_VERSION="$(
+            sed -n 's/^PKG_VERSION:=//p' \
+            openwrt/feeds/packages/net/zerotier/Makefile \
+            | head -n1
+          )"
+
+          CLOUDFLARED_VERSION="$(
+            sed -n 's/^PKG_VERSION:=//p' \
+            openwrt/feeds/packages/net/cloudflared/Makefile \
+            | head -n1
+          )"
+
+          cat > release-notes.md <<NOTES
+          ## Netcore N60 Pro ImmortalWrt
+
+          - 固件版本：ImmortalWrt 25.12
+          - 编译日期：${BUILD_DATE}
+          - 源码版本：${SOURCE_REVISION}
+          - 源码提交：${SOURCE_COMMIT}
+          - OpenClash：${OPENCLASH_VERSION}
+          - ZeroTier：${ZEROTIER_VERSION}
+          - Cloudflared：${CLOUDFLARED_VERSION}
+          - 默认管理地址：192.168.10.1
+
+          ### 已集成功能
+
+          - OpenClash
+          - ZeroTier
+          - 网络唤醒
+          - nlbwmon 流量统计
+          - Cloudflare Tunnel
+
+          日常升级请下载文件名包含 sysupgrade 的固件。
+          NOTES
+
+          gh release create "$RELEASE_TAG" \
+            firmware/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes-file release-notes.md \
+            --latest
