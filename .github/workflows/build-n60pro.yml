@@ -1,0 +1,156 @@
+name: Build Netcore N60 Pro ImmortalWrt
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "选择 ImmortalWrt 源码分支"
+        required: true
+        default: "openwrt-25.12"
+        type: choice
+        options:
+          - openwrt-25.12
+          - openwrt-24.10
+          - master
+
+permissions:
+  contents: read
+
+env:
+  REPO_URL: https://github.com/immortalwrt/immortalwrt
+  CONFIG_FILE: n60pro.config
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    name: Build N60 Pro
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout builder repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h
+
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ack antlr3 asciidoc autoconf automake autopoint \
+            binutils bison build-essential bzip2 ccache clang \
+            cmake cpio curl device-tree-compiler fastjar flex \
+            gawk gettext gcc-multilib g++-multilib git gnutls-dev \
+            gperf haveged help2man intltool lib32gcc-s1 \
+            libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev \
+            libltdl-dev libmpc-dev libmpfr-dev libncurses-dev \
+            libpython3-dev libreadline-dev libssl-dev libtool \
+            libyaml-dev libz-dev lld llvm mkisofs ninja-build \
+            p7zip p7zip-full patch pkgconf python3 python3-docutils \
+            python3-pip python3-ply python3-pyelftools qemu-utils \
+            re2c rsync scons squashfs-tools subversion swig \
+            texinfo uglifyjs unzip vim wget xmlto xxd \
+            zlib1g-dev zstd file
+
+          sudo apt-get clean
+
+      - name: Clone ImmortalWrt source
+        run: |
+          git clone \
+            --depth 1 \
+            --single-branch \
+            --branch "${{ inputs.source_branch }}" \
+            "${REPO_URL}" \
+            openwrt
+
+          cd openwrt
+          echo "Source branch:"
+          git branch --show-current
+          echo "Source commit:"
+          git log -1 --oneline
+
+      - name: Update feeds
+        working-directory: openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Load N60 Pro configuration
+        run: |
+          cp "${CONFIG_FILE}" openwrt/.config
+
+          cd openwrt
+          make defconfig
+
+          echo "Selected device:"
+          grep -E '^CONFIG_TARGET|DEVICE_netcore_n60-pro' .config | head -n 30
+
+          if ! grep -q \
+            '^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_netcore_n60-pro=y' \
+            .config; then
+            echo "N60 Pro target was not selected."
+            exit 1
+          fi
+
+      - name: Download source packages
+        working-directory: openwrt
+        run: |
+          make download -j8 || make download -j1 V=s
+
+          find dl -type f -size -1024c -print
+          find dl -type f -size -1024c -delete
+
+      - name: Compile firmware
+        working-directory: openwrt
+        run: |
+          echo "Building with $(nproc) threads"
+
+          make -j"$(nproc)" || make -j1 V=s
+
+      - name: Collect N60 Pro firmware
+        run: |
+          mkdir -p firmware
+
+          TARGET_DIR="openwrt/bin/targets/mediatek/filogic"
+
+          if [ ! -d "${TARGET_DIR}" ]; then
+            echo "Target output directory does not exist."
+            exit 1
+          fi
+
+          find "${TARGET_DIR}" -maxdepth 1 -type f \
+            \( \
+              -name '*netcore_n60-pro*' \
+              -o -name 'sha256sums' \
+              -o -name 'profiles.json' \
+              -o -name '*.manifest' \
+              -o -name 'config.buildinfo' \
+              -o -name 'feeds.buildinfo' \
+            \) \
+            -exec cp -v {} firmware/ \;
+
+          echo "Collected firmware files:"
+          ls -lh firmware
+
+          if ! find firmware -type f \
+            -name '*netcore_n60-pro-squashfs-sysupgrade.*' \
+            | grep -q .; then
+            echo "Sysupgrade firmware was not generated."
+            exit 1
+          fi
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: immortalwrt-${{ inputs.source_branch }}-netcore-n60-pro
+          path: firmware/*
+          if-no-files-found: error
+          retention-days: 30
