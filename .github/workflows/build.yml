@@ -149,36 +149,26 @@ jobs:
           cp "$GITHUB_WORKSPACE/${CONFIG_FILE}" .config
 
           make defconfig
-          # 检查 N60 Pro 目标
+
+          echo "========================================"
+          echo "Check N60 Pro target"
+          echo "========================================"
+
           grep -q '^CONFIG_TARGET_mediatek=y$' .config
           grep -q '^CONFIG_TARGET_mediatek_filogic=y$' .config
           grep -q '^CONFIG_TARGET_MULTI_PROFILE=y$' .config
           grep -q '^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_netcore_n60-pro=y$' .config
 
-          # 检查主要插件
-          grep -q '^CONFIG_PACKAGE_luci-app-openclash=y$' .config
-          grep -q '^CONFIG_PACKAGE_luci-app-mentohust=y$' .config
-          grep -q '^CONFIG_PACKAGE_mentohust=y$' .config
+          echo "N60 Pro target check passed."
 
-          echo "N60 Pro target and required packages check passed."
-
-          echo "Target configuration:"
-
-          grep -E \
-            '^CONFIG_TARGET_mediatek|^CONFIG_TARGET_MULTI_PROFILE|netcore_n60-pro' \
-            .config
-
-          if ! grep -qx \
-            'CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_netcore_n60-pro=y' \
-            .config; then
-            echo "Netcore N60 Pro target is not selected."
-            exit 1
-          fi
-
-          echo "Check required packages:"
+          echo "========================================"
+          echo "Check required packages"
+          echo "========================================"
 
           for package in \
             luci-app-openclash \
+            luci-app-mentohust \
+            mentohust \
             luci-app-zerotier \
             luci-app-nlbwmon \
             luci-app-wol \
@@ -191,6 +181,18 @@ jobs:
 
             echo "Selected: ${package}"
           done
+
+          echo "========================================"
+          echo "Target configuration"
+          echo "========================================"
+
+          grep -E \
+            '^CONFIG_TARGET_mediatek|^CONFIG_TARGET_MULTI_PROFILE|netcore_n60-pro' \
+            .config
+
+          echo "========================================"
+          echo "All required configuration checks passed."
+          echo "========================================"
 
       - name: Restore download cache
         uses: actions/cache@v4
@@ -306,7 +308,9 @@ jobs:
           Source commit: ${SOURCE_COMMIT}
           GitHub build: ${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}
           Default IP: 192.168.10.1
-          Included: OpenClash, ZeroTier, Wake-on-LAN, nlbwmon, Cloudflare Tunnel
+          Hostname: N60-Pro
+          Timezone: Asia/Shanghai
+          Included: OpenClash, MentoHUST, ZeroTier, Wake-on-LAN, nlbwmon, Cloudflare Tunnel
           INFO
 
           (
@@ -315,7 +319,6 @@ jobs:
           )
 
           echo "Firmware files:"
-
           ls -lh firmware
 
           if ! find firmware \
@@ -333,6 +336,12 @@ jobs:
           OPENCLASH_VERSION="$(
             sed -n 's/^PKG_VERSION:=//p' \
             openwrt/package/luci-app-openclash/Makefile \
+            | head -n1
+          )"
+
+          MENTOHUST_VERSION="$(
+            sed -n 's/^PKG_VERSION:=//p' \
+            openwrt/package/mentohust/mentohust/Makefile \
             | head -n1
           )"
 
@@ -356,19 +365,37 @@ jobs:
           - 源码版本：${SOURCE_REVISION}
           - 源码提交：${SOURCE_COMMIT}
           - OpenClash：${OPENCLASH_VERSION}
+          - MentoHUST：${MENTOHUST_VERSION}
           - ZeroTier：${ZEROTIER_VERSION}
           - Cloudflared：${CLOUDFLARED_VERSION}
           - 默认管理地址：192.168.10.1
+          - 默认主机名：N60-Pro
+          - 默认时区：Asia/Shanghai
 
           ### 已集成功能
 
           - OpenClash
+          - MentoHUST
           - ZeroTier
           - 网络唤醒
           - nlbwmon 流量统计
           - Cloudflare Tunnel
+          - ttyd Web 终端
+          - UPnP
+          - USB 3.0 / USB 存储
+          - 常用网络工具
 
-          日常升级请下载文件名包含 sysupgrade 的固件。
+          ### 固件说明
+
+          - \`sysupgrade.itb\`：日常升级使用
+          - \`recovery.itb\`：恢复/救砖使用
+          - \`uboot.fip\`：U-Boot
+          - \`preloader.bin\`：Preloader
+          - \`sha256sums.txt\`：SHA256 校验值
+          - \`build-info.txt\`：本次编译信息
+
+          日常升级请下载文件名包含 \`sysupgrade\` 的固件。
+
           NOTES
 
           gh release create "$RELEASE_TAG" \
