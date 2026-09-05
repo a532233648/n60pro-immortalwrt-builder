@@ -149,6 +149,18 @@ jobs:
           cp "$GITHUB_WORKSPACE/${CONFIG_FILE}" .config
 
           make defconfig
+          # 检查 N60 Pro 目标
+          grep -q '^CONFIG_TARGET_mediatek=y$' .config
+          grep -q '^CONFIG_TARGET_mediatek_filogic=y$' .config
+          grep -q '^CONFIG_TARGET_MULTI_PROFILE=y$' .config
+          grep -q '^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_netcore_n60-pro=y$' .config
+
+          # 检查主要插件
+          grep -q '^CONFIG_PACKAGE_luci-app-openclash=y$' .config
+          grep -q '^CONFIG_PACKAGE_luci-app-mentohust=y$' .config
+          grep -q '^CONFIG_PACKAGE_mentohust=y$' .config
+
+          echo "N60 Pro target and required packages check passed."
 
           echo "Target configuration:"
 
