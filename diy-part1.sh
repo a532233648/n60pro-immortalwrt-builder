@@ -3,7 +3,7 @@
 set -e
 
 #=================================================
-# 添加 OpenClash 源码
+# 添加 OpenClash
 #=================================================
 
 rm -rf package/luci-app-openclash
@@ -22,10 +22,19 @@ rm -rf /tmp/OpenClash
 
 
 #=================================================
-# 添加其他第三方软件源示例
-#
-# 暂时不需要时保持注释即可
+# 添加 MentoHUST
 #=================================================
 
-# echo 'src-git mypackages https://github.com/用户名/仓库名.git;main' \
-# >> feeds.conf.default
+rm -rf package/mentohust
+rm -rf /tmp/luci-app-mentohust
+
+git clone \
+  --depth 1 \
+  https://github.com/sbwml/luci-app-mentohust.git \
+  /tmp/luci-app-mentohust
+
+cp -rf \
+  /tmp/luci-app-mentohust \
+  package/mentohust
+
+rm -rf /tmp/luci-app-mentohust
