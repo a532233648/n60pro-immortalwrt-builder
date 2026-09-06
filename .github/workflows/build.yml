@@ -313,7 +313,7 @@ jobs:
           Default IP: 192.168.10.1
           Hostname: N60-Pro
           Timezone: Asia/Shanghai
-          Included: OpenClash, MentoHUST, ZeroTier, Wake-on-LAN, nlbwmon, Cloudflare Tunnel
+          Included: OpenClash, MentoHUST, MiniEAP, ZeroTier, Wake-on-LAN, nlbwmon, Cloudflare Tunnel
           INFO
 
           (
@@ -379,6 +379,7 @@ jobs:
 
           - OpenClash
           - MentoHUST
+          - MiniEAP
           - ZeroTier
           - 网络唤醒
           - nlbwmon 流量统计
