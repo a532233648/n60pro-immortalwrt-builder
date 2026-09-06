@@ -39,22 +39,4 @@ cp -rf \
 
 rm -rf /tmp/luci-app-mentohust
 
-
-#=================================================
-# 添加 MiniEAP
-#=================================================
-
-rm -rf package/minieap-openwrt
-rm -rf /tmp/minieap-openwrt
-
-git clone \
-  --depth 1 \
-  --branch default \
-  https://github.com/AutoCONFIG/minieap-openwrt.git \
-  /tmp/minieap-openwrt
-
-cp -rf \
-  /tmp/minieap-openwrt \
-  package/minieap-openwrt
-
 rm -rf /tmp/minieap-openwrt
