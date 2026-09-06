@@ -169,8 +169,6 @@ jobs:
             luci-app-openclash \
             luci-app-mentohust \
             mentohust \
-            luci-proto-minieap \
-            luci-i18n-minieap-zh-cn \
             luci-app-zerotier \
             luci-app-nlbwmon \
             luci-app-wol \
